@@ -45,9 +45,19 @@ Item {
   readonly property string modeLabel: Trace.trailLabel(root.mode)
   readonly property string statusText: Trace.statusLine(root.trailState)
 
+  function syncFromShared() {
+    var s = Trace.readState()
+    root.hyprlandReady = s.hyprlandReady
+    root.errorText = s.error
+    root.ring = s.ring
+    root.forceDemo = s.forceDemo
+    root.hermesHome = s.hermesHome
+    root.hermesBin = s.hermesBin
+  }
+
   function open(payloadJson) {
     var payload = Trace.parsePayload(payloadJson)
-    root.forceDemo = payload.forceDemo === true
+    Trace.writeForceDemo(payload.forceDemo === true)
     root.opened = true
     root.ingestFocused()
     root.rebuildDisplay()
@@ -73,45 +83,49 @@ Item {
   }
 
   function setHyprlandError(message) {
-    root.errorText = message || "Hyprland IPC failed"
-    root.hyprlandReady = false
+    Trace.markHyprlandError(message)
+    root.syncFromShared()
   }
 
   function ingestWorkspace(workspace) {
-    if (!workspace) return false
-    var visit = Trace.visitFromWorkspace(workspace, Date.now())
-    if (!visit) return false
-    root.hyprlandReady = true
-    root.errorText = ""
-    root.ring = Trace.pushVisit(root.ring, visit, Trace.RING_CAP)
-    return true
+    var ok = Trace.applyVisit(workspace, Date.now())
+    root.syncFromShared()
+    return ok
   }
 
   function ingestFocused() {
     try {
       if (typeof Hyprland === "undefined") {
-        root.setHyprlandError("Hyprland IPC unavailable")
-        return
+        Trace.markHyprlandError("Hyprland IPC unavailable")
+      } else {
+        Trace.ingestFromHyprland(Hyprland, Date.now())
       }
-      var ws = Hyprland.focusedWorkspace
-      if (root.ingestWorkspace(ws)) return
-      root.hyprlandReady = false
     } catch (e) {
-      root.setHyprlandError("Hyprland IPC failed")
+      Trace.markHyprlandError("Hyprland IPC failed")
     }
+    root.syncFromShared()
   }
 
   function jumpWorkspace(ghost) {
-    var spec = Trace.jumpSpec(ghost)
+    var spec = Trace.jumpSpec(ghost, root.mode)
+    if (spec.kind !== "hyprland") {
+      root.jumping = false
+      return false
+    }
     root.jumping = true
     jumpReset.restart()
-    if (spec.kind !== "hyprland") return false
     try {
       if (typeof Hyprland !== "undefined" && typeof Hyprland.dispatch === "function") {
         Hyprland.dispatch(spec.dispatch)
         return true
       }
     } catch (e1) {}
+    try {
+      if (typeof Hyprland !== "undefined" && typeof Hyprland.dispatch === "function" && spec.fallback) {
+        Hyprland.dispatch(spec.fallback)
+        return true
+      }
+    } catch (e1b) {}
     try {
       Quickshell.execDetached(spec.argv)
       return true
@@ -136,14 +150,14 @@ Item {
   }
 
   function rebuildDisplay() {
+    root.syncFromShared()
     var ghosts = Trace.effectiveGhosts(root.trailState, Date.now())
-    root.displayRows = Trace.decorateTrail(ghosts, Date.now(), root.selectedIndex)
+    root.displayRows = Trace.decorateTrail(ghosts, Date.now(), root.selectedIndex, root.mode)
     if (root.displayRows.length === 0) root.selectedIndex = 0
     else if (root.selectedIndex >= root.displayRows.length)
       root.selectedIndex = root.displayRows.length - 1
     root.agentRows = Trace.agentFootprints({
       hermesHome: root.hermesHome,
-      hermesBin: root.hermesBin,
       now: Date.now()
     })
   }
@@ -189,14 +203,16 @@ Item {
   FileView {
     path: Quickshell.env("HOME") + "/.hermes/state.db"
     printErrors: false
-    onLoaded: root.hermesHome = true
-    onLoadFailed: root.hermesHome = false
-  }
-
-  Process {
-    id: hermesBinProc
-    command: ["bash", "-c", "command -v hermes >/dev/null"]
-    onExited: root.hermesBin = hermesBinProc.exitCode === 0
+    onLoaded: {
+      Trace.writeHermesFlags({ hermesHome: true })
+      root.syncFromShared()
+      if (root.opened) root.rebuildDisplay()
+    }
+    onLoadFailed: {
+      Trace.writeHermesFlags({ hermesHome: false })
+      root.syncFromShared()
+      if (root.opened) root.rebuildDisplay()
+    }
   }
 
   property var focusedWorkspace: {
@@ -293,14 +309,30 @@ Item {
           anchors.margins: Style.space(16)
           spacing: Style.space(8)
 
-          Text {
-            textFormat: Text.PlainText
-            text: String(modelData.label || modelData.name || "")
-            color: root.foreground
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.heading
-            font.bold: true
-            opacity: 0.9
+          Row {
+            width: parent.width
+            spacing: Style.space(10)
+
+            Text {
+              textFormat: Text.PlainText
+              text: String(modelData.label || modelData.name || "")
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.heading
+              font.bold: true
+              opacity: 0.9
+            }
+
+            Text {
+              text: String(modelData.chip || root.modeLabel)
+              color: root.accent
+              opacity: 0.85
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              font.bold: true
+              font.letterSpacing: 1.2
+              anchors.verticalCenter: parent.verticalCenter
+            }
           }
 
           Repeater {
@@ -442,7 +474,7 @@ Item {
                   anchors.fill: parent
                   anchors.margins: Style.space(8)
                   textFormat: Text.PlainText
-                  text: String(modelData.label || "Hermes") + " · DETECTED"
+                  text: String(modelData.label || "Hermes") + " · " + Trace.presenceLabel(modelData)
                   color: root.foreground
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.caption
@@ -540,7 +572,6 @@ Item {
   }
 
   Component.onCompleted: {
-    if (!hermesBinProc.running) hermesBinProc.running = true
     root.ingestFocused()
     root.rebuildDisplay()
   }
