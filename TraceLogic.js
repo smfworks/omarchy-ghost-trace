@@ -1,9 +1,10 @@
 .pragma library
 
-// Ghost Trace helpers. Workspace history is an in-memory ring while the
-// keepLoaded overlay is mounted. DEMO ghosts are labeled DEMO. Agent
-// footprints appear only when Hermes is actually detectable — never as
-// invented session status.
+// Ghost Trace helpers. Workspace history is a shared in-memory ring while
+// the keepLoaded overlay (and bar) stay mounted. DEMO / LIVE / STALE / ERR
+// are exhaustive. Jump uses Hyprland helpers only while LIVE. Hermes
+// footprints appear only when ~/.hermes/state.db is readable — never from
+// PATH, never as invented session status.
 
 var RING_CAP = 8
 var MIN_RING = 6
@@ -11,6 +12,8 @@ var MAX_RING = 12
 var MAX_AGE_MS = 12 * 60 * 1000
 var MAX_WINDOWS = 4
 var POLL_MS = 2000
+
+var shared = emptyState()
 
 function clamp(value, lo, hi) {
   return Math.max(lo, Math.min(hi, value))
@@ -67,6 +70,50 @@ function cloneGhost(ghost) {
     presence: String(ghost.presence || ""),
     detail: String(ghost.detail || "")
   }
+}
+
+function cloneRing(ring) {
+  var list = ring || []
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var item = cloneGhost(list[i])
+    if (item) out.push(item)
+  }
+  return out
+}
+
+function readState() {
+  return {
+    hyprlandReady: shared.hyprlandReady === true,
+    error: String(shared.error || ""),
+    ring: cloneRing(shared.ring),
+    forceDemo: shared.forceDemo === true,
+    hermesHome: shared.hermesHome === true,
+    hermesBin: shared.hermesBin === true
+  }
+}
+
+function resetSharedState() {
+  shared = emptyState()
+  return readState()
+}
+
+function writeForceDemo(flag) {
+  shared.forceDemo = flag === true
+  return readState()
+}
+
+function writeHermesFlags(flags) {
+  flags = flags || {}
+  if (flags.hermesHome !== undefined) shared.hermesHome = flags.hermesHome === true
+  if (flags.hermesBin !== undefined) shared.hermesBin = flags.hermesBin === true
+  return readState()
+}
+
+function markHyprlandError(message) {
+  shared.hyprlandReady = false
+  shared.error = message || "Hyprland IPC failed"
+  return readState()
 }
 
 function workspaceLabel(name, id) {
@@ -126,9 +173,18 @@ function visitFromWorkspace(workspace, now) {
   }
 }
 
+function isLiveVisit(entry) {
+  if (!entry) return false
+  if (String(entry.kind || "workspace") === "agent") return false
+  return String(entry.source || "") === "hyprland"
+    && String(entry.presence || "") === "live"
+}
+
 function sameVisit(left, right) {
   if (!left || !right) return false
   if (String(left.kind || "workspace") !== String(right.kind || "workspace"))
+    return false
+  if (String(left.source || "") !== String(right.source || ""))
     return false
   if (String(left.id || "") && String(left.id) === String(right.id))
     return true
@@ -151,13 +207,7 @@ function mergeVisit(previous, next) {
 }
 
 function pushVisit(ring, visit, cap) {
-  var next = []
-  var list = ring || []
-  var i
-  for (i = 0; i < list.length; i++) {
-    var item = cloneGhost(list[i])
-    if (item) next.push(item)
-  }
+  var next = cloneRing(ring)
   var incoming = cloneGhost(visit)
   if (!incoming || !incoming.id) return next
   if (next.length && sameVisit(next[0], incoming)) {
@@ -173,9 +223,40 @@ function pushVisit(ring, visit, cap) {
 function hasLiveVisits(ring) {
   var list = ring || []
   for (var i = 0; i < list.length; i++) {
-    if (String(list[i].source || "") === "hyprland") return true
+    if (isLiveVisit(list[i])) return true
   }
   return false
+}
+
+function applyVisit(workspace, now) {
+  var visit = visitFromWorkspace(workspace, now)
+  if (!visit) {
+    markHyprlandError("Hyprland workspace snapshot invalid")
+    return false
+  }
+  shared.hyprlandReady = true
+  shared.error = ""
+  shared.ring = pushVisit(shared.ring, visit, RING_CAP)
+  return true
+}
+
+function ingestFromHyprland(hyprland, now) {
+  if (!hyprland) {
+    markHyprlandError("Hyprland IPC unavailable")
+    return false
+  }
+  var ws = null
+  try {
+    ws = hyprland.focusedWorkspace
+  } catch (e) {
+    markHyprlandError("Hyprland IPC failed")
+    return false
+  }
+  if (!ws) {
+    markHyprlandError("Hyprland focused workspace unavailable")
+    return false
+  }
+  return applyVisit(ws, now)
 }
 
 function demoWindows(kind) {
@@ -201,7 +282,7 @@ function demoGhost(id, name, label, kind, ageMs, now) {
   return {
     kind: "workspace",
     id: "demo:" + id,
-    workspaceId: id,
+    workspaceId: "",
     name: String(name),
     label: String(label),
     windows: demoWindows(kind),
@@ -228,7 +309,7 @@ function demoTrail(now) {
 function agentFootprints(flags) {
   flags = flags || {}
   var out = []
-  if (flags.hermesHome === true || flags.hermesBin === true) {
+  if (flags.hermesHome === true) {
     out.push({
       kind: "agent",
       id: "agent:hermes",
@@ -239,9 +320,7 @@ function agentFootprints(flags) {
       visitedAt: number(flags.now) || Date.now(),
       source: "detected",
       presence: "detected",
-      detail: flags.hermesHome
-        ? "state.db present — no session status"
-        : "hermes binary present — no session status"
+      detail: "state.db present — no session status"
     })
   }
   return out
@@ -252,7 +331,19 @@ function presenceLabel(entry) {
   if (value === "demo") return "DEMO"
   if (value === "detected") return "DETECTED"
   if (value === "live") return "LIVE"
+  if (value === "stale") return "STALE"
+  if (value === "err") return "ERR"
   return ""
+}
+
+function ghostChip(ghost, mode) {
+  if (!ghost) return "DEMO"
+  if (String(ghost.kind || "") === "agent") return "DETECTED"
+  var resolved = String(mode || trailMode(emptyState()))
+  if (resolved === "stale") return "STALE"
+  if (resolved === "live") return isLiveVisit(ghost) ? "LIVE" : "DEMO"
+  if (resolved === "err") return "DEMO"
+  return "DEMO"
 }
 
 function neverInventedAgentStatus(entry) {
@@ -266,9 +357,10 @@ function neverInventedAgentStatus(entry) {
 function trailMode(state) {
   state = state || emptyState()
   if (state.forceDemo === true) return "demo"
-  if (state.error && hasLiveVisits(state.ring)) return "stale"
+  var live = hasLiveVisits(state.ring)
+  if (live && (state.error || state.hyprlandReady !== true)) return "stale"
   if (state.error) return "err"
-  if (state.hyprlandReady === true && hasLiveVisits(state.ring)) return "live"
+  if (state.hyprlandReady === true && live) return "live"
   return "demo"
 }
 
@@ -277,7 +369,7 @@ function trailLabel(mode) {
   if (mode === "stale") return "STALE"
   if (mode === "demo") return "DEMO"
   if (mode === "live") return "LIVE"
-  return String(mode || "").toUpperCase()
+  return "DEMO"
 }
 
 function statusLine(state) {
@@ -295,8 +387,10 @@ function statusLine(state) {
 function effectiveGhosts(state, now) {
   state = state || emptyState()
   var mode = trailMode(state)
-  if (mode === "live" || mode === "stale")
-    return (state.ring || []).slice()
+  if (mode === "live" || mode === "stale") {
+    var ring = cloneRing(state.ring)
+    if (ring.length > 0) return ring
+  }
   return demoTrail(now)
 }
 
@@ -327,8 +421,9 @@ function wrapIndex(index, count, delta) {
   return ((i + d) % n + n) % n
 }
 
-function decorateTrail(ghosts, now, selectedIndex) {
+function decorateTrail(ghosts, now, selectedIndex, mode) {
   var list = ghosts || []
+  var resolved = String(mode || "")
   var out = []
   for (var i = 0; i < list.length; i++) {
     var g = cloneGhost(list[i])
@@ -337,7 +432,7 @@ function decorateTrail(ghosts, now, selectedIndex) {
     g.ageLabel = relativeTime(g.visitedAt, now)
     g.opacity = ageOpacity(g.visitedAt, now, i, list.length)
     g.selected = i === selectedIndex
-    g.chip = presenceLabel(g)
+    g.chip = ghostChip(g, resolved)
     g.railY = (i + 0.55) / Math.max(list.length + 0.2, 1)
     g.trailX = 0.58 - i * 0.052
     g.trailY = 0.26 + i * 0.068
@@ -348,24 +443,50 @@ function decorateTrail(ghosts, now, selectedIndex) {
   return out
 }
 
-function jumpSpec(ghost) {
-  if (!ghost) return { kind: "noop", dispatch: "", fallback: "", argv: [] }
-  if (ghost.kind === "agent")
-    return { kind: "noop", dispatch: "", fallback: "", argv: [] }
-  if (ghost.source === "demo" || ghost.presence === "demo")
-    return { kind: "demo", dispatch: "", fallback: "", argv: [] }
+function noopSpec() {
+  return { kind: "noop", dispatch: "", fallback: "", argv: [] }
+}
+
+function demoSpec() {
+  return { kind: "demo", dispatch: "", fallback: "", argv: [] }
+}
+
+function workspaceFocusToken(ghost) {
+  if (!ghost) return ""
   var id = ghost.workspaceId
-  if (id === undefined || id === null || id === "")
-    return { kind: "noop", dispatch: "", fallback: "", argv: [] }
+  if (id === undefined || id === null || id === "") return ""
+  var token = String(id).trim()
+  if (!/^[A-Za-z0-9:_./+-]+$/.test(token)) return ""
+  return token
+}
+
+function jumpSpec(ghost, mode) {
+  mode = String(mode || "")
+  if (!ghost) return noopSpec()
+  if (ghost.kind === "agent") return noopSpec()
+  if (mode !== "live") {
+    if (mode === "demo" || mode === "err"
+      || ghost.source === "demo" || ghost.presence === "demo")
+      return demoSpec()
+    return noopSpec()
+  }
+  if (ghost.source === "demo" || ghost.presence === "demo") return demoSpec()
+  if (!isLiveVisit(ghost)) return noopSpec()
+  var token = workspaceFocusToken(ghost)
+  if (!token) return noopSpec()
   // Same Lua dispatcher Omarchy's omarchy.workspaces widget uses:
-  // hyprctl dispatch 'hl.dsp.focus({ workspace = "N" })'
-  var dispatch = "hl.dsp.focus({ workspace = \"" + String(id) + "\" })"
+  // Hyprland.dispatch('hl.dsp.focus({ workspace = "N" })')
+  var dispatch = "hl.dsp.focus({ workspace = \"" + token + "\" })"
   return {
     kind: "hyprland",
     dispatch: dispatch,
-    fallback: "workspace " + String(id),
+    fallback: "workspace " + token,
     argv: ["hyprctl", "dispatch", dispatch]
   }
+}
+
+function canJump(ghost, mode) {
+  return jumpSpec(ghost, mode).kind === "hyprland"
 }
 
 function parsePayload(raw) {
@@ -383,7 +504,10 @@ function parsePayload(raw) {
 
 function catalogHint(mode, agentCount) {
   var parts = []
-  parts.push(mode === "live" || mode === "stale" ? "hyprland trail" : "demo trail")
+  if (mode === "live") parts.push("hyprland trail")
+  else if (mode === "stale") parts.push("stale hyprland trail")
+  else if (mode === "err") parts.push("demo trail · error")
+  else parts.push("demo trail")
   if (number(agentCount) > 0) parts.push(number(agentCount) + " detected agent home")
   else parts.push("no agent footprints")
   return parts.join(" · ")

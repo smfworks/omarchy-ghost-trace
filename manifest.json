@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "smf.ghost-trace",
   "name": "Ghost Trace",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "SMF Works",
   "license": "MIT",
   "description": "Sci-fi workspace footprint trail: soft glowing ghost outlines of recently visited Hyprland workspaces. Click a ghost to jump back.",

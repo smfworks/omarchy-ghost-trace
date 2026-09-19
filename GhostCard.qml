@@ -19,7 +19,9 @@ Item {
   readonly property var windows: (root.ghost && root.ghost.windows) ? root.ghost.windows : []
   readonly property string titleText: root.ghost && root.ghost.label ? String(root.ghost.label) : "Workspace"
   readonly property string ageText: root.ghost && root.ghost.ageLabel ? String(root.ghost.ageLabel) : ""
-  readonly property string chipText: root.ghost && root.ghost.chip ? String(root.ghost.chip) : ""
+  readonly property string chipText: root.ghost && root.ghost.chip
+    ? String(root.ghost.chip)
+    : "DEMO"
 
   width: Style.space(196)
   height: Style.space(78)
@@ -131,7 +133,7 @@ Item {
         }
 
         Text {
-          visible: root.chipText !== ""
+          visible: true
           text: root.chipText
           color: root.accent
           opacity: 0.8
