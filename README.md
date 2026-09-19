@@ -1,0 +1,3 @@
+# omarchy-ghost-trace
+
+Scaffolding Ghost Trace Workspaces for Omarchy Quattro…
