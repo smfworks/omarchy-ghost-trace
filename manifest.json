@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "smf.ghost-trace",
+  "name": "Ghost Trace",
+  "version": "0.1.0",
+  "author": "SMF Works",
+  "license": "MIT",
+  "description": "Sci-fi workspace footprint trail: soft glowing ghost outlines of recently visited Hyprland workspaces. Click a ghost to jump back.",
+  "kinds": ["overlay", "bar-widget"],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "Overlay.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Ghost Trace",
+    "description": "Summons the workspace afterimage overlay.",
+    "category": "Compositor",
+    "allowMultiple": false,
+    "defaultSection": "left"
+  }
+}
