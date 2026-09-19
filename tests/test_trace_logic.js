@@ -36,7 +36,7 @@ demo.forEach(function(ghost) {
   assert.strictEqual(ghost.presence, "demo");
   assert.strictEqual(Trace.presenceLabel(ghost), "DEMO");
   assert.strictEqual(Trace.jumpSpec(ghost).kind, "demo");
-  assert.deepStrictEqual(Trace.jumpSpec(ghost).argv, []);
+  assert.strictEqual(Trace.jumpSpec(ghost).argv.length, 0);
 });
 
 const empty = Trace.emptyState();
@@ -133,9 +133,9 @@ assert.strictEqual(
   Trace.jumpSpec(ws).dispatch,
   'hl.dsp.focus({ workspace = "4" })'
 );
-assert.deepStrictEqual(
-  Trace.jumpSpec(ws).argv,
-  ["hyprctl", "dispatch", 'hl.dsp.focus({ workspace = "4" })']
+assert.strictEqual(
+  Trace.jumpSpec(ws).argv.join(" "),
+  'hyprctl dispatch hl.dsp.focus({ workspace = "4" })'
 );
 
 assert.strictEqual(Trace.visitFromWorkspace(null), null);

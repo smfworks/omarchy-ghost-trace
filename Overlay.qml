@@ -366,6 +366,7 @@ Item {
         spacing: Style.space(10)
 
         Text {
+          id: railTitle
           width: parent.width
           text: "GHOST TRACE"
           color: root.accent
@@ -377,6 +378,7 @@ Item {
         }
 
         Text {
+          id: railStatus
           width: parent.width
           textFormat: Text.PlainText
           text: root.statusText
@@ -387,51 +389,67 @@ Item {
           wrapMode: Text.WordWrap
         }
 
-        Repeater {
-          model: root.displayRows
+        Flickable {
+          width: parent.width
+          height: Math.max(Style.space(80), parent.height - railTitle.height - railStatus.height - Style.space(24))
+          clip: true
+          contentWidth: width
+          contentHeight: railColumn.implicitHeight
+          boundsBehavior: Flickable.StopAtBounds
+          flickableDirection: Flickable.VerticalFlick
 
-          GhostCard {
-            required property var modelData
-            required property int index
+          Column {
+            id: railColumn
             width: parent.width
-            ghost: modelData
-            selected: index === root.selectedIndex
-            jumping: root.jumping && index === root.selectedIndex
-            ghostOpacity: Number(modelData.opacity || 0.5)
-            accent: root.accent
-            foreground: root.foreground
-            glass: root.background
-            fontFamily: root.fontFamily
-            onHovered: {
-              root.selectedIndex = index
-              root.rebuildDisplay()
+            spacing: Style.space(8)
+
+            Repeater {
+              model: root.displayRows
+
+              GhostCard {
+                required property var modelData
+                required property int index
+                width: railColumn.width
+                ghost: modelData
+                selected: index === root.selectedIndex
+                jumping: root.jumping && index === root.selectedIndex
+                ghostOpacity: Number(modelData.opacity || 0.5)
+                accent: root.accent
+                foreground: root.foreground
+                glass: root.background
+                fontFamily: root.fontFamily
+                onHovered: {
+                  root.selectedIndex = index
+                  root.rebuildDisplay()
+                }
+                onActivated: root.activateIndex(index)
+              }
             }
-            onActivated: root.activateIndex(index)
-          }
-        }
 
-        Repeater {
-          model: root.agentRows
+            Repeater {
+              model: root.agentRows
 
-          Rectangle {
-            required property var modelData
-            width: parent.width
-            height: Style.space(36)
-            radius: Style.space(8)
-            color: Util.alpha(root.accent, 0.08)
-            border.width: 1
-            border.color: Util.alpha(root.accent, 0.28)
+              Rectangle {
+                required property var modelData
+                width: railColumn.width
+                height: Style.space(36)
+                radius: Style.space(8)
+                color: Util.alpha(root.accent, 0.08)
+                border.width: 1
+                border.color: Util.alpha(root.accent, 0.28)
 
-            Text {
-              anchors.fill: parent
-              anchors.margins: Style.space(8)
-              textFormat: Text.PlainText
-              text: String(modelData.label || "Hermes") + " · DETECTED"
-              color: root.foreground
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-              elide: Text.ElideRight
-              verticalAlignment: Text.AlignVCenter
+                Text {
+                  anchors.fill: parent
+                  anchors.margins: Style.space(8)
+                  textFormat: Text.PlainText
+                  text: String(modelData.label || "Hermes") + " · DETECTED"
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  elide: Text.ElideRight
+                  verticalAlignment: Text.AlignVCenter
+                }
+              }
             }
           }
         }

@@ -22,7 +22,7 @@ Item {
   readonly property string chipText: root.ghost && root.ghost.chip ? String(root.ghost.chip) : ""
 
   width: Style.space(196)
-  height: Style.space(92)
+  height: Style.space(78)
 
   Rectangle {
     id: glow
