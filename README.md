@@ -16,6 +16,12 @@ Do not trust a screenshot of the trail until you have read
 [docs/OPPOSITION.md](docs/OPPOSITION.md). The honesty PR makes DEMO / LIVE /
 STALE / ERR *disprovable* on the overlay, every ghost, and the bar chip.
 
+## Demo
+
+Ghost Trace on Omarchy (mikesai6) — workspace afterimage trail overlay.
+
+https://github.com/smfworks/omarchy-ghost-trace/releases/download/demo/demo.mp4
+
 ## Install
 
 ```sh
